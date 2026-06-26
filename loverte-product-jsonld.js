@@ -12,13 +12,14 @@
 
   if (existing && existing.getAttribute("data-path") === path) return;
   if (window.__loverteProductSchemaPath === path) return;
+
   window.__loverteProductSchemaPath = path;
   if (existing) existing.remove();
 
   var lang = match[1];
   var urlKey = decodeURIComponent(match[2]);
 
-  var query = 'query ProductSchema($key:String!){products(filter:{url_key:{eq:$key}}){items{sku name meta_description description{html} short_description{html} image{url label} price_range{minimum_price{final_price{value currency} regular_price{value currency}}} stock_status ... on ConfigurableProduct{variants{product{sku name stock_status price_range{minimum_price{final_price{value currency} regular_price{value currency}}}}}}}}}';
+  var query = 'query ProductSchema($key:String!){products(filter:{url_key:{eq:$key}}){items{sku name meta_description description{html} short_description{html} image{url label} review_count rating_summary reviews(pageSize:5){items{nickname summary text average_rating created_at}} price_range{minimum_price{final_price{value currency} regular_price{value currency}}} stock_status ... on ConfigurableProduct{variants{product{sku name stock_status price_range{minimum_price{final_price{value currency} regular_price{value currency}}}}}}}}}';
 
   function text(html) {
     var div = document.createElement("div");
@@ -30,6 +31,12 @@
     return status === "IN_STOCK"
       ? "https://schema.org/InStock"
       : "https://schema.org/OutOfStock";
+  }
+
+  function ratingFromPercent(value) {
+    var number = Number(value);
+    if (!number) return null;
+    return String(Math.round((number / 20) * 10) / 10);
   }
 
   function offerFromProduct(p) {
@@ -59,6 +66,7 @@
     .then(function (res) { return res.json(); })
     .then(function (json) {
       var item = json && json.data && json.data.products && json.data.products.items[0];
+
       if (!item || !item.name || !item.sku) {
         window.__loverteProductSchemaPath = null;
         return;
@@ -78,6 +86,39 @@
         "image": item.image && item.image.url,
         "offers": offers
       };
+
+      var ratingValue = ratingFromPercent(item.rating_summary);
+
+      if (item.review_count && ratingValue) {
+        product.aggregateRating = {
+          "@type": "AggregateRating",
+          "ratingValue": ratingValue,
+          "reviewCount": String(item.review_count),
+          "bestRating": "5",
+          "worstRating": "1"
+        };
+      }
+
+      if (item.reviews && item.reviews.items && item.reviews.items.length) {
+        product.review = item.reviews.items.map(function (review) {
+          return {
+            "@type": "Review",
+            "author": {
+              "@type": "Person",
+              "name": review.nickname || "Customer"
+            },
+            "datePublished": review.created_at ? review.created_at.split(" ")[0] : undefined,
+            "name": review.summary || undefined,
+            "reviewBody": review.text || review.summary || undefined,
+            "reviewRating": {
+              "@type": "Rating",
+              "ratingValue": ratingFromPercent(review.average_rating),
+              "bestRating": "5",
+              "worstRating": "1"
+            }
+          };
+        });
+      }
 
       var script = document.createElement("script");
       script.type = "application/ld+json";
