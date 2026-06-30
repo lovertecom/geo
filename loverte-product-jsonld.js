@@ -1,6 +1,7 @@
 (function () {
   var productId = "loverte-product-jsonld";
   var breadcrumbId = "loverte-breadcrumb-jsonld";
+  var scriptVersion = "lightseo2-csp-nonce-datalayer";
   var path = location.pathname;
   var existingProduct = document.getElementById(productId);
   var existingBreadcrumb = document.getElementById(breadcrumbId);
@@ -91,6 +92,7 @@
     window.dataLayer = window.dataLayer || [];
     window.dataLayer.push({
       event: "loverte_product_structured_data_ready",
+      loverte_product_jsonld_script_version: scriptVersion,
       loverte_product_schema_path: pathValue,
       loverte_product_jsonld: product,
       loverte_breadcrumb_jsonld: breadcrumbs || null,
