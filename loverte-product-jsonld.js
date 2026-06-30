@@ -47,13 +47,55 @@
     return String(value || "").replace(/\s+/g, " ").trim();
   }
 
+  function elementNonce(element) {
+    if (!element) return "";
+    return element.nonce || element.getAttribute("nonce") || element.getAttribute("data-csp-nonce") || "";
+  }
+
+  function pageNonce() {
+    var nonce = elementNonce(document.currentScript);
+    var scripts;
+    var i;
+
+    if (nonce) return nonce;
+
+    scripts = document.getElementsByTagName("script");
+    for (i = 0; i < scripts.length; i++) {
+      nonce = elementNonce(scripts[i]);
+      if (nonce) return nonce;
+    }
+
+    return "";
+  }
+
   function addScript(id, data, pathValue) {
+    var nonce = pageNonce();
     var script = document.createElement("script");
+
+    if (!nonce) {
+      window.__loverteProductSchemaNonceMissing = true;
+      return false;
+    }
+
     script.type = "application/ld+json";
     script.id = id;
     script.setAttribute("data-path", pathValue);
-    script.text = JSON.stringify(data);
+    script.nonce = nonce;
+    script.textContent = JSON.stringify(data);
     document.head.appendChild(script);
+
+    return true;
+  }
+
+  function pushDataLayer(product, breadcrumbs, pathValue) {
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      event: "loverte_product_structured_data_ready",
+      loverte_product_schema_path: pathValue,
+      loverte_product_jsonld: product,
+      loverte_breadcrumb_jsonld: breadcrumbs || null,
+      loverte_jsonld_inserted: !window.__loverteProductSchemaNonceMissing
+    });
   }
 
   function offerFromProduct(p) {
@@ -262,12 +304,16 @@
         });
       }
 
-      addScript(productId, product, path);
-
       var breadcrumbs = breadcrumbSchema(category, item.name);
+      var productInserted = addScript(productId, product, path);
+      var breadcrumbsInserted = true;
+
       if (breadcrumbs) {
-        addScript(breadcrumbId, breadcrumbs, path);
+        breadcrumbsInserted = addScript(breadcrumbId, breadcrumbs, path);
       }
+
+      window.__loverteProductSchemaNonceMissing = !productInserted || !breadcrumbsInserted;
+      pushDataLayer(product, breadcrumbs, path);
     })
     .catch(function (error) {
       window.__loverteProductSchemaPath = null;
