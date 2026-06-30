@@ -1,7 +1,7 @@
 (function () {
   var productId = "loverte-product-jsonld";
   var breadcrumbId = "loverte-breadcrumb-jsonld";
-  var scriptVersion = "lightseo2-csp-nonce-datalayer";
+  var scriptVersion = "lightseo3-init-safe-datalayer";
   var path = location.pathname;
   var existingProduct = document.getElementById(productId);
   var existingBreadcrumb = document.getElementById(breadcrumbId);
@@ -11,11 +11,23 @@
     if (existingProduct) existingProduct.remove();
     if (existingBreadcrumb) existingBreadcrumb.remove();
     window.__loverteProductSchemaPath = null;
+    pushDataLayerEvent("loverte_product_structured_data_skipped", {
+      loverte_product_schema_skip_reason: "unsupported_path"
+    });
     return;
   }
 
-  if (existingProduct && existingProduct.getAttribute("data-path") === path) return;
-  if (window.__loverteProductSchemaPath === path) return;
+  if (existingProduct && existingProduct.getAttribute("data-path") === path) {
+    pushDataLayerFromExisting(existingProduct, existingBreadcrumb, path);
+    return;
+  }
+
+  if (window.__loverteProductSchemaPath === path) {
+    pushDataLayerEvent("loverte_product_structured_data_pending", {
+      loverte_product_schema_pending_reason: "already_loading"
+    });
+    return;
+  }
 
   window.__loverteProductSchemaPath = path;
   if (existingProduct) existingProduct.remove();
@@ -72,9 +84,15 @@
   function addScript(id, data, pathValue) {
     var nonce = pageNonce();
     var script = document.createElement("script");
+    var parent = document.head || document.getElementsByTagName("head")[0] || document.documentElement;
 
     if (!nonce) {
       window.__loverteProductSchemaNonceMissing = true;
+      return false;
+    }
+
+    if (!parent) {
+      window.__loverteProductSchemaAppendError = "missing_parent";
       return false;
     }
 
@@ -83,21 +101,60 @@
     script.setAttribute("data-path", pathValue);
     script.nonce = nonce;
     script.textContent = JSON.stringify(data);
-    document.head.appendChild(script);
+
+    try {
+      parent.appendChild(script);
+    } catch (error) {
+      window.__loverteProductSchemaAppendError = error && error.message ? error.message : String(error);
+      return false;
+    }
 
     return true;
   }
 
-  function pushDataLayer(product, breadcrumbs, pathValue) {
+  function pushDataLayerEvent(eventName, data) {
+    var payload = data || {};
     window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push({
-      event: "loverte_product_structured_data_ready",
-      loverte_product_jsonld_script_version: scriptVersion,
+
+    payload.event = eventName;
+    payload.loverte_product_jsonld_script_version = scriptVersion;
+    payload.loverte_product_schema_path = payload.loverte_product_schema_path || path;
+    payload.loverte_document_ready_state = document.readyState;
+
+    window.dataLayer.push(payload);
+  }
+
+  function pushDataLayer(product, breadcrumbs, pathValue) {
+    pushDataLayerEvent("loverte_product_structured_data_ready", {
       loverte_product_schema_path: pathValue,
       loverte_product_jsonld: product,
       loverte_breadcrumb_jsonld: breadcrumbs || null,
-      loverte_jsonld_inserted: !window.__loverteProductSchemaNonceMissing
+      loverte_jsonld_inserted: !window.__loverteProductSchemaNonceMissing && !window.__loverteProductSchemaAppendError,
+      loverte_jsonld_append_error: window.__loverteProductSchemaAppendError || null
     });
+  }
+
+  function parseJsonScript(script) {
+    if (!script) return null;
+
+    try {
+      return JSON.parse(script.textContent || script.text || "null");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function pushDataLayerFromExisting(productScript, breadcrumbScript, pathValue) {
+    var product = parseJsonScript(productScript);
+
+    if (!product) {
+      pushDataLayerEvent("loverte_product_structured_data_error", {
+        loverte_product_schema_error: "existing_product_json_parse_failed"
+      });
+      return;
+    }
+
+    pushDataLayer(product, parseJsonScript(breadcrumbScript), pathValue);
   }
 
   function offerFromProduct(p) {
@@ -183,6 +240,8 @@
     };
   }
 
+  pushDataLayerEvent("loverte_product_structured_data_start");
+
   fetch("/graphql", {
     method: "POST",
     credentials: "same-origin",
@@ -198,6 +257,9 @@
 
       if (!item || !item.name || !item.sku) {
         window.__loverteProductSchemaPath = null;
+        pushDataLayerEvent("loverte_product_structured_data_empty", {
+          loverte_product_schema_empty_reason: "product_not_found"
+        });
         return;
       }
 
@@ -319,6 +381,9 @@
     })
     .catch(function (error) {
       window.__loverteProductSchemaPath = null;
+      pushDataLayerEvent("loverte_product_structured_data_error", {
+        loverte_product_schema_error: error && error.message ? error.message : String(error)
+      });
       console.error("Loverte Product JSON-LD failed", error);
     });
 })();
